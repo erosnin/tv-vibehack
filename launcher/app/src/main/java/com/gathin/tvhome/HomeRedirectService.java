@@ -174,9 +174,10 @@ public class HomeRedirectService extends AccessibilityService {
                 // An empty hint redirects every screen of the stock home package.
                 if (!hint.isEmpty() && (cls == null || !cls.toString().contains(hint))) return;
                 Log.i(TAG, "stock home in front (" + cls + ")");
-            } else if (wasFront.equals(getPackageName())) {
-                // Content/windows events from the stock home while the launcher is in front are leftovers of the
-                // last redirect; only a real state change (Home pressed again) counts then.
+            } else if (wasFront.equals(getPackageName()) || wasFront.equals(stock)) {
+                // Content/windows events only count as an early sign of the home screen when coming from another
+                // app. From the launcher they are leftovers of the last redirect, and from the stock package they
+                // belong to its other screens (Fire OS Settings lives there): only a home state change counts.
                 return;
             }
             // The first sign of the stock home (often a content or windows event, before the state change):
