@@ -16,7 +16,8 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $apkPath = if ($Apk) { (Resolve-Path $Apk).Path } else { $null }
-Set-Location $PSScriptRoot
+Push-Location $PSScriptRoot
+try {
 $py = '..\tools\venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { throw 'Run tools\setup.ps1 first.' }
 $env:TV_HOST = $TvHost
@@ -43,14 +44,17 @@ Write-Host "Sending $apkPath to the TV..."
 & $py -I ..\tools\b64push.py $apkPath /data/local/tmp/tvhome.apk
 if ($LASTEXITCODE -ne 0) { throw 'Copy to the TV failed.' }
 @(
-    'pm install -r /data/local/tmp/tvhome.apk',
+    # Each GitHub Actions build is signed with a fresh debug key, so an update can be refused with
+    # INSTALL_FAILED_UPDATE_INCOMPATIBLE. Then the old copy is removed and the new one installed.
+    'pm install -r /data/local/tmp/tvhome.apk || { pm uninstall com.gathin.tvhome; pm install /data/local/tmp/tvhome.apk; }',
     'rm -f /data/local/tmp/tvhome.apk',
-    'pm grant com.gathin.tvhome android.permission.ACCESS_FINE_LOCATION 2>/dev/null; echo location-granted'
+    'pm grant com.gathin.tvhome android.permission.ACCESS_FINE_LOCATION 2>/dev/null; echo location-granted',
+    'appops set com.gathin.tvhome SYSTEM_ALERT_WINDOW allow; echo overlay-allowed'
 ) | & $py -I ..\tools\tv.py --batch
 
 if (-not $NoRedirect) {
     # Turn on the accessibility service that sends Amazon's Home to this launcher (adb's shell may change
-    # secure settings itself; the app gets no extra permission).
+    # secure settings itself).
     $svc = 'com.gathin.tvhome/com.gathin.tvhome.HomeRedirectService'
     $cur = (& $py -I ..\tools\tv.py 'settings get secure enabled_accessibility_services' | Out-String).Trim()
     if (-not $cur -or $cur -eq 'null') { $new = $svc }
@@ -66,3 +70,6 @@ if (-not $NoRedirect) {
     Write-Host "Home redirect on. Accessibility services before this: $before"
 }
 Write-Host 'Installed. Press Home on the remote.'
+} finally {
+    Pop-Location
+}

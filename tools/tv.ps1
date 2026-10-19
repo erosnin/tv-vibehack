@@ -8,7 +8,8 @@ param(
     [switch]$Probe
 )
 $ErrorActionPreference = 'Stop'
-Set-Location (Split-Path -Parent $PSScriptRoot)
+Push-Location (Split-Path -Parent $PSScriptRoot)
+try {
 $py = 'tools\venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { throw 'Run tools\setup.ps1 first.' }
 $env:TV_HOST = $TvHost
@@ -17,4 +18,8 @@ if ($Probe -or -not $Command) {
 } else {
     & $py -I tools\tv.py $Command
 }
-exit $LASTEXITCODE
+$code = $LASTEXITCODE
+} finally {
+    Pop-Location
+}
+exit $code

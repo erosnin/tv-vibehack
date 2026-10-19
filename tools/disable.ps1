@@ -9,7 +9,8 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $listPath = (Resolve-Path $List).Path
-Set-Location $repo
+Push-Location $repo
+try {
 $py = 'tools\venv\Scripts\python.exe'
 if (-not (Test-Path $py)) { throw 'Run tools\setup.ps1 first.' }
 
@@ -20,3 +21,6 @@ $cmds = foreach ($line in Get-Content $listPath) {
 $cmds += 'pm list packages -d'
 $env:TV_HOST = $TvHost
 $cmds | & $py -I tools\tv.py --batch
+} finally {
+    Pop-Location
+}

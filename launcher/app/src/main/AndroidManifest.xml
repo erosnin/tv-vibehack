@@ -8,7 +8,9 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- Needed on Android 10 to read the Wi-Fi network name; granted over adb at install time. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-        <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Fire OS 8 / Android 11: lets the Home redirect open this launcher from the background. Granted over adb
+         (appops set com.gathin.tvhome SYSTEM_ALERT_WINDOW allow) by install.ps1 / build-and-install.sh. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <application
         android:label="@string/app_name"

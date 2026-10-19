@@ -1,7 +1,6 @@
 package com.gathin.tvhome;
 
 import android.accessibilityservice.AccessibilityService;
-import android.app.ActivityManager;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.ComponentName;
@@ -12,19 +11,18 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
 import android.view.Gravity;
-import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
+import android.widget.ImageView;
 
 /**
- * For TVs (Fire OS) where the stock launcher can't be replaced or disabled.
+ * For TVs (Fire OS) where the stock launcher can't be replaced or disabled: when the stock home screen comes
+ * to the front, start this launcher instead.
  *
- * 1. Home button: the press is caught before the system sees it and this launcher is opened directly, so the
- *    stock home never appears. Hold Home (0.8 s) to go to the stock home instead. If the launcher doesn't show up
- *    within a second, the normal system Home is sent so the remote never gets stuck.
- * 2. Fallback: whenever the stock home screen comes to the front anyway (Back from an app, or if Fire OS doesn't
- *    pass the Home key to accessibility services), this launcher is started on top of it.
+ * Fire OS keeps the Home button to itself, so the stock home always starts first. To hide it, the moment the
+ * stock home begins to appear a full-screen cover showing this launcher's background is laid over everything,
+ * and it is removed as soon as this launcher is in front (or after a few seconds, whatever happens).
  *
  * The "Amazon Home" tile calls {@link #allowStockHome()} to let the stock home through once; it stays open until
  * another app takes the foreground. Inactive unless config.xml sets stock_home_package.
@@ -32,16 +30,25 @@ import android.view.accessibility.AccessibilityEvent;
 public class HomeRedirectService extends AccessibilityService {
 
     private static final String TAG = "TvHomeRedirect";
-    private static final long LONG_PRESS_MS = 800;
-    private static final long CONFIRM_MS = 1000;
+    /** The cover never stays longer than this, even if the launcher never shows up. */
+    private static final long COVER_MAX_MS = 4000;
+    /** Lets the launcher draw its first frame before the cover is lifted. */
+    private static final long COVER_LIFT_DELAY_MS = 150;
     private static volatile boolean allowStock;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable liftCover = this::hideCover;
+    private WindowManager wm;
     /** A 1x1 transparent overlay that keeps this app counted as having a visible window (see onServiceConnected). */
     private View anchor;
-    private long homeDownAt = -1;
-    private String foregroundPkg = "";
-    private boolean launchConfirmed;
+    /** Full-screen image of the launcher background, shown over the stock home while the launcher starts. */
+    private ImageView cover;
+    private boolean coverShown;
+    /** Package of the last app that came to the front (system UI ignored). */
+    private String lastFront = "";
+    /** When the launcher was last started from here, to ignore the burst of events that follows. */
+    private long lastTriggerAt;
+    private static final long TRIGGER_GAP_MS = 1500;
 
     static void allowStockHome() {
         allowStock = true;
@@ -55,11 +62,11 @@ public class HomeRedirectService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         if (!active()) return;
+        wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         // Android 10+ (Fire OS 8 is Android 11) blocks activity starts from apps in the background. One of the
         // exemptions is "the app has a visible window". An accessibility service may add an accessibility overlay
         // without any extra permission, so a 1x1 transparent one is kept on screen while the redirect is on.
         try {
-            WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
             WindowManager.LayoutParams lp = new WindowManager.LayoutParams(1, 1,
                     WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -80,9 +87,10 @@ public class HomeRedirectService extends AccessibilityService {
     @Override
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
-        if (anchor != null) {
+        hideCover();
+        if (anchor != null && wm != null) {
             try {
-                ((WindowManager) getSystemService(WINDOW_SERVICE)).removeView(anchor);
+                wm.removeView(anchor);
             } catch (Exception ignored) {
             }
             anchor = null;
@@ -90,93 +98,109 @@ public class HomeRedirectService extends AccessibilityService {
         super.onDestroy();
     }
 
-    // ---- 1. the Home button -----------------------------------------------------------------------
-
     @Override
-    protected boolean onKeyEvent(KeyEvent event) {
-        if (event.getKeyCode() != KeyEvent.KEYCODE_HOME || !active()) return false;
-        if (event.getAction() == KeyEvent.ACTION_DOWN) {
-            if (event.getRepeatCount() == 0) homeDownAt = event.getEventTime();
-            return true;    // swallow it: the system never starts the stock home
-        }
-        if (event.getAction() == KeyEvent.ACTION_UP) {
-            long held = homeDownAt < 0 ? 0 : event.getEventTime() - homeDownAt;
-            homeDownAt = -1;
-            if (held >= LONG_PRESS_MS) {
-                Log.i(TAG, "Home held: opening the stock home");
-                allowStock = true;
-                performGlobalAction(GLOBAL_ACTION_HOME);
-            } else {
-                openLauncherNow();
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        CharSequence pkgCs = event.getPackageName();
+        if (pkgCs == null || !active()) return;
+        String pkg = pkgCs.toString();
+        String stock = getString(R.string.stock_home_package).trim();
+        boolean stateChange = event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
+        boolean systemUi = pkg.equals("android") || pkg.startsWith("com.android.")
+                || pkg.startsWith("com.amazon.tv.quicksettings");
+        String wasFront = lastFront;
+        if (stateChange && !systemUi) lastFront = pkg;
+
+        if (pkg.equals(getPackageName())) {
+            // The launcher is in front: lift the cover once it has drawn.
+            if (stateChange) {
+                allowStock = false;
+                if (coverShown) {
+                    handler.removeCallbacks(liftCover);
+                    handler.postDelayed(liftCover, COVER_LIFT_DELAY_MS);
+                }
             }
+            return;
         }
-        return true;
-    }
 
-    private void openLauncherNow() {
-        boolean alreadyInFront = getPackageName().equals(foregroundPkg);
-        launchConfirmed = false;
-        try {
-            startActivity(launcherIntent());
-            Log.i(TAG, "Home pressed: launcher started");
-        } catch (Exception e) {
-            Log.w(TAG, "Home pressed: launcher start failed", e);
-        }
-        if (alreadyInFront) return;
-        // Safety net: if the launcher didn't come up (e.g. a Fire OS update blocks it), send the normal Home
-        // so the remote keeps working; the stock-home fallback below then redirects as before.
-        handler.postDelayed(() -> {
-            if (!launchConfirmed && !launcherInFront()) {
-                Log.w(TAG, "launcher did not appear, sending the system Home");
-                performGlobalAction(GLOBAL_ACTION_HOME);
+        if (pkg.equals(stock)) {
+            if (allowStock) return;
+            if (stateChange) {
+                CharSequence cls = event.getClassName();
+                String hint = getString(R.string.stock_home_class_hint).trim();
+                // An empty hint redirects every screen of the stock home package.
+                if (!hint.isEmpty() && (cls == null || !cls.toString().contains(hint))) return;
+                Log.i(TAG, "stock home in front (" + cls + ")");
+            } else if (wasFront.equals(getPackageName())) {
+                // Content/windows events from the stock home while the launcher is in front are leftovers of the
+                // last redirect; only a real state change (Home pressed again) counts then.
+                return;
             }
-        }, CONFIRM_MS);
+            // The first sign of the stock home (often a content or windows event, before the state change):
+            // cover it and start the launcher.
+            long now = SystemClock.uptimeMillis();
+            if (now - lastTriggerAt < TRIGGER_GAP_MS) return;
+            lastTriggerAt = now;
+            showCover();
+            startLauncher();
+            return;
+        }
+
+        if (stateChange && !systemUi) {
+            allowStock = false;     // another app is in front: the stock home is redirected again
+            if (coverShown) hideCover();
+        }
     }
 
-    /** True while this app's activity is on top (its process is then IMPORTANCE_FOREGROUND, not just bound). */
-    private static boolean launcherInFront() {
-        ActivityManager.RunningAppProcessInfo info = new ActivityManager.RunningAppProcessInfo();
-        ActivityManager.getMyMemoryState(info);
-        return info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
-    }
-
-    private Intent launcherIntent() {
-        return new Intent(Intent.ACTION_MAIN)
+    private void startLauncher() {
+        Intent home = new Intent(Intent.ACTION_MAIN)
                 .addCategory(Intent.CATEGORY_HOME)
                 .setComponent(new ComponentName(this, MainActivity.class))
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        // Right after Home, Android holds activity starts from background apps for 5 seconds unless the sender has
+        // STOP_APP_SWITCHES. An alarm's PendingIntent is sent by the system, which does, so it starts at once.
+        PendingIntent pi = PendingIntent.getActivity(this, 0, home, PendingIntent.FLAG_UPDATE_CURRENT);
+        ((AlarmManager) getSystemService(ALARM_SERVICE))
+                .setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime(), pi);
+        Log.i(TAG, "launcher start requested");
     }
 
-    // ---- 2. the stock home appearing anyway ---------------------------------------------------------
-
-    @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
-        CharSequence pkgCs = event.getPackageName();
-        if (pkgCs == null) return;
-        String pkg = pkgCs.toString();
-        if (!active()) return;
-        String stock = getString(R.string.stock_home_package).trim();
-
-        boolean systemUi = pkg.equals("android") || pkg.startsWith("com.android.")
-                || pkg.startsWith("com.amazon.tv.quicksettings");
-        if (!systemUi) foregroundPkg = pkg;
-        if (pkg.equals(getPackageName())) launchConfirmed = true;
-
-        if (pkg.equals(stock)) {
-            CharSequence cls = event.getClassName();
-            String hint = getString(R.string.stock_home_class_hint).trim();
-            // An empty hint redirects every screen of the stock home package.
-            if (allowStock || (!hint.isEmpty() && (cls == null || !cls.toString().contains(hint)))) return;
-            Log.i(TAG, "stock home in front (" + cls + "), redirecting");
-            // Right after Home, Android holds activity starts from background apps for 5 seconds unless the sender has
-            // STOP_APP_SWITCHES. An alarm's PendingIntent is sent by the system, which does, so it starts at once.
-            PendingIntent pi = PendingIntent.getActivity(this, 0, launcherIntent(), PendingIntent.FLAG_UPDATE_CURRENT);
-            ((AlarmManager) getSystemService(ALARM_SERVICE))
-                    .setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + 1, pi);
-        } else if (!systemUi) {
-            allowStock = false;     // another app (or this launcher) is in front: the stock home is redirected again
+    private void showCover() {
+        if (coverShown || wm == null) return;
+        try {
+            if (cover == null) {
+                cover = new ImageView(this);
+                cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                cover.setImageResource(R.drawable.nocturne_bg);
+            }
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.OPAQUE);
+            lp.gravity = Gravity.TOP | Gravity.START;
+            lp.windowAnimations = 0;
+            wm.addView(cover, lp);
+            coverShown = true;
+            handler.removeCallbacks(liftCover);
+            handler.postDelayed(liftCover, COVER_MAX_MS);
+            Log.i(TAG, "cover shown");
+        } catch (Exception e) {
+            Log.w(TAG, "cover failed", e);
         }
+    }
+
+    private void hideCover() {
+        handler.removeCallbacks(liftCover);
+        if (!coverShown || cover == null || wm == null) return;
+        try {
+            wm.removeView(cover);
+        } catch (Exception ignored) {
+        }
+        coverShown = false;
+        Log.i(TAG, "cover lifted");
     }
 
     @Override

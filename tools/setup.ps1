@@ -3,7 +3,8 @@
 #
 # Usage (PowerShell, from the repo folder):   powershell -ExecutionPolicy Bypass -File tools\setup.ps1
 $ErrorActionPreference = 'Stop'
-Set-Location (Split-Path -Parent $PSScriptRoot)
+Push-Location (Split-Path -Parent $PSScriptRoot)
+try {
 
 if (Get-Command py -ErrorAction SilentlyContinue) {
     & py -3 -m venv tools\venv
@@ -17,3 +18,6 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path tools\venv\Scripts\python.exe)) {
 & tools\venv\Scripts\python.exe -m pip install -r tools\requirements.txt
 if ($LASTEXITCODE -ne 0) { throw 'pip install failed.' }
 Write-Host 'Done. Next: tools\tv.ps1 -TvHost <stick ip> -Probe   (accept the "Allow USB debugging" prompt on the TV)'
+} finally {
+    Pop-Location
+}
