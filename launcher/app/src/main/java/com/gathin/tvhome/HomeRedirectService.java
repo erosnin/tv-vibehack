@@ -5,6 +5,8 @@ import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.ComponentName;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.PixelFormat;
 import android.os.Handler;
 import android.os.Looper;
@@ -21,8 +23,9 @@ import android.widget.ImageView;
  * to the front, start this launcher instead.
  *
  * Fire OS keeps the Home button to itself, so the stock home always starts first. To hide it, the moment the
- * stock home begins to appear a full-screen cover showing this launcher's background is laid over everything,
- * and it is removed as soon as this launcher is in front (or after a few seconds, whatever happens).
+ * stock home begins to appear a full-screen cover showing this launcher's background is switched on over
+ * everything, and switched off as soon as this launcher is in front (or after a few seconds, whatever happens).
+ * The cover window is created hidden when the service starts, so showing it costs one frame.
  *
  * The "Amazon Home" tile calls {@link #allowStockHome()} to let the stock home through once; it stays open until
  * another app takes the foreground. Inactive unless config.xml sets stock_home_package.
@@ -33,7 +36,9 @@ public class HomeRedirectService extends AccessibilityService {
     /** The cover never stays longer than this, even if the launcher never shows up. */
     private static final long COVER_MAX_MS = 4000;
     /** Lets the launcher draw its first frame before the cover is lifted. */
-    private static final long COVER_LIFT_DELAY_MS = 150;
+    private static final long COVER_LIFT_DELAY_MS = 100;
+    /** Stock-home events this soon after the launcher came to the front are part of the same switch. */
+    private static final long SETTLE_MS = 1000;
     private static volatile boolean allowStock;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -48,7 +53,9 @@ public class HomeRedirectService extends AccessibilityService {
     private String lastFront = "";
     /** When the launcher was last started from here, to ignore the burst of events that follows. */
     private long lastTriggerAt;
-    private static final long TRIGGER_GAP_MS = 1500;
+    private static final long TRIGGER_GAP_MS = 3000;
+    /** When the launcher last came to the front. */
+    private long launcherFrontAt;
 
     static void allowStockHome() {
         allowStock = true;
@@ -82,12 +89,48 @@ public class HomeRedirectService extends AccessibilityService {
         } catch (Exception e) {
             Log.w(TAG, "overlay anchor failed", e);
         }
+        prepareCover();
+    }
+
+    /** Decodes the background and adds the full-screen cover window once, hidden, so showing it is instant. */
+    private void prepareCover() {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inPreferredConfig = Bitmap.Config.RGB_565;     // half the memory; it's an opaque photo-like image
+            Bitmap bg = BitmapFactory.decodeResource(getResources(), R.drawable.nocturne_bg, o);
+            ImageView v = new ImageView(this);
+            v.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            v.setImageBitmap(bg);
+            v.setVisibility(View.GONE);
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.OPAQUE);
+            lp.gravity = Gravity.TOP | Gravity.START;
+            lp.windowAnimations = 0;
+            wm.addView(v, lp);
+            cover = v;
+            Log.i(TAG, "cover prepared");
+        } catch (Exception e) {
+            Log.w(TAG, "cover prepare failed", e);
+        }
     }
 
     @Override
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
-        hideCover();
+        if (cover != null && wm != null) {
+            try {
+                wm.removeView(cover);
+            } catch (Exception ignored) {
+            }
+            cover = null;
+            coverShown = false;
+        }
         if (anchor != null && wm != null) {
             try {
                 wm.removeView(anchor);
@@ -114,6 +157,7 @@ public class HomeRedirectService extends AccessibilityService {
             // The launcher is in front: lift the cover once it has drawn.
             if (stateChange) {
                 allowStock = false;
+                launcherFrontAt = SystemClock.uptimeMillis();
                 if (coverShown) {
                     handler.removeCallbacks(liftCover);
                     handler.postDelayed(liftCover, COVER_LIFT_DELAY_MS);
@@ -138,7 +182,7 @@ public class HomeRedirectService extends AccessibilityService {
             // The first sign of the stock home (often a content or windows event, before the state change):
             // cover it and start the launcher.
             long now = SystemClock.uptimeMillis();
-            if (now - lastTriggerAt < TRIGGER_GAP_MS) return;
+            if (now - lastTriggerAt < TRIGGER_GAP_MS || now - launcherFrontAt < SETTLE_MS) return;
             lastTriggerAt = now;
             showCover();
             startLauncher();
@@ -147,6 +191,7 @@ public class HomeRedirectService extends AccessibilityService {
 
         if (stateChange && !systemUi) {
             allowStock = false;     // another app is in front: the stock home is redirected again
+            lastTriggerAt = 0;      // and the next Home press counts at once, however quick
             if (coverShown) hideCover();
         }
     }
@@ -165,40 +210,18 @@ public class HomeRedirectService extends AccessibilityService {
     }
 
     private void showCover() {
-        if (coverShown || wm == null) return;
-        try {
-            if (cover == null) {
-                cover = new ImageView(this);
-                cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                cover.setImageResource(R.drawable.nocturne_bg);
-            }
-            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                    PixelFormat.OPAQUE);
-            lp.gravity = Gravity.TOP | Gravity.START;
-            lp.windowAnimations = 0;
-            wm.addView(cover, lp);
-            coverShown = true;
-            handler.removeCallbacks(liftCover);
-            handler.postDelayed(liftCover, COVER_MAX_MS);
-            Log.i(TAG, "cover shown");
-        } catch (Exception e) {
-            Log.w(TAG, "cover failed", e);
-        }
+        if (coverShown || cover == null) return;
+        cover.setVisibility(View.VISIBLE);
+        coverShown = true;
+        handler.removeCallbacks(liftCover);
+        handler.postDelayed(liftCover, COVER_MAX_MS);
+        Log.i(TAG, "cover shown");
     }
 
     private void hideCover() {
         handler.removeCallbacks(liftCover);
-        if (!coverShown || cover == null || wm == null) return;
-        try {
-            wm.removeView(cover);
-        } catch (Exception ignored) {
-        }
+        if (!coverShown || cover == null) return;
+        cover.setVisibility(View.GONE);
         coverShown = false;
         Log.i(TAG, "cover lifted");
     }
