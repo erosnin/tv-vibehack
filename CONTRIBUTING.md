@@ -27,7 +27,8 @@ is reversible from the TV's own settings if the tools are gone.
 The launcher lives in `launcher/` and is deliberately small: plain Java, AndroidX RecyclerView and
 DynamicAnimation, no Kotlin, no Compose, no network. It targets TVs with 1 GB of RAM, so:
 
-- No blur, no video backgrounds, no polling, no background services.
+- No blur, no video backgrounds, no polling, no background services. The one exception is the opt-in
+  `HomeRedirectService` for Fire OS (README, "Fire TV"); it is inactive unless `stock_home_package` is set.
 - Anything that depends on a specific TV goes in `app/src/main/res/values/config.xml`, not in code.
 - Keep D-pad navigation deterministic. Test Up/Down/Left/Right from every edge.
 - Verify on a real TV, not only the emulator. The easiest way is remote key injection plus a

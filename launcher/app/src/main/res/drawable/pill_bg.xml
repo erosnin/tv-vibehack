@@ -1,16 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Top bar pill: glossy silver, solid teal when focused. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_focused="true">
         <shape android:shape="rectangle">
-            <solid android:color="#F5FFFFFF" />
-            <corners android:radius="21dp" />
+            <solid android:color="#FF0E7C7D" />
+            <corners android:radius="18dp" />
         </shape>
     </item>
     <item>
-        <shape android:shape="rectangle">
-            <gradient android:angle="270" android:startColor="#2EFFFFFF" android:endColor="#14FFFFFF" />
-            <stroke android:width="1dp" android:color="#38FFFFFF" />
-            <corners android:radius="21dp" />
-        </shape>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <gradient android:angle="270" android:startColor="#FFFFFFFF" android:endColor="#FFE4E8EB" />
+                    <stroke android:width="1dp" android:color="#FFC3CAD0" />
+                    <corners android:radius="18dp" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
 </selector>

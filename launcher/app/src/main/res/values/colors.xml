@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nocturne palette: white mixed with silver, one teal accent. -->
+<resources>
+    <color name="bg">#FFF3F5F6</color>
+    <color name="ink">#FF182025</color>
+    <color name="sub">#FF5B676E</color>
+    <color name="teal">#FF0E7C7D</color>
+    <color name="silver_line">#FFC3CAD0</color>
+</resources>

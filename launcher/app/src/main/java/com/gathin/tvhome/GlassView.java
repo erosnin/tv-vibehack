@@ -11,10 +11,12 @@ import android.util.AttributeSet;
 import android.view.View;
 
 /**
- * A translucent glass slab: soft sheen fill, bright top specular, crisp rim and a faint outer glow.
+ * The focus highlight: a clear glass slab with a soft top sheen, a teal rim and a faint teal glow.
  * One instance floats over the grid and is moved with spring animations between tiles.
  */
 public class GlassView extends View {
+
+    private static final int TEAL = 0x0E7C7D;
 
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint specular = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -30,8 +32,8 @@ public class GlassView extends View {
         density = getResources().getDisplayMetrics().density;
         radius = 20f * density;
         rim.setStyle(Paint.Style.STROKE);
-        rim.setStrokeWidth(1.5f * density);
-        rim.setColor(0xCCFFFFFF);
+        rim.setStrokeWidth(2.5f * density);
+        rim.setColor(0xFF000000 | TEAL);
         glow.setStyle(Paint.Style.STROKE);
     }
 
@@ -43,8 +45,8 @@ public class GlassView extends View {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        fill.setShader(new LinearGradient(0, 0, 0, h, 0x3DFFFFFF, 0x12FFFFFF, Shader.TileMode.CLAMP));
-        specular.setShader(new LinearGradient(0, 0, 0, h * 0.45f, 0x66FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
+        fill.setShader(new LinearGradient(0, 0, 0, h, 0x24FFFFFF, 0x0AFFFFFF, Shader.TileMode.CLAMP));
+        specular.setShader(new LinearGradient(0, 0, 0, h * 0.45f, 0x59FFFFFF, 0x00FFFFFF, Shader.TileMode.CLAMP));
     }
 
     @Override
@@ -52,10 +54,10 @@ public class GlassView extends View {
         float inset = 6f * density;   // room for the glow
         rect.set(inset, inset, getWidth() - inset, getHeight() - inset);
 
-        // Outer glow: three widening, fading strokes.
+        // Outer glow: three widening, fading teal strokes.
         for (int i = 1; i <= 3; i++) {
             glow.setStrokeWidth(i * 2f * density);
-            glow.setColor((0x30 / i) << 24 | 0xFFFFFF);
+            glow.setColor((0x40 / i) << 24 | TEAL);
             float o = i * density;
             canvas.drawRoundRect(rect.left - o, rect.top - o, rect.right + o, rect.bottom + o, radius + o, radius + o, glow);
         }

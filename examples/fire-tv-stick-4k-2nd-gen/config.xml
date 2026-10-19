@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher configuration for the Fire TV Stick 4K (2nd gen, Fire OS 8). This is also the default
+  launcher/app/src/main/res/values/config.xml on the nocturne-fire-stick branch.
+  Package names: on the stick run `pm list packages` (tools\tv.py "pm list packages").
+-->
+<resources>
+
+    <!-- Apps pinned to the bottom row, in this order. Missing apps are skipped and the next apps move up. -->
+    <string-array name="dock_apps">
+        <item>com.stremio.one</item>
+        <item>com.amazon.firetv.youtube</item>
+        <item>org.jellyfin.androidtv</item>
+        <item>com.spotify.tv.android</item>
+        <item>com.esaba.downloader</item>
+        <item>com.amazon.cloud9</item>
+    </string-array>
+
+    <!-- Apps never shown as tiles. -->
+    <string-array name="hidden_apps">
+    </string-array>
+
+    <!-- A stick has no tuner. -->
+    <string name="live_tv_package" translatable="false"></string>
+
+    <!-- Tiles per row; the bottom row always has this many slots. -->
+    <integer name="columns">6</integer>
+
+    <!-- Fire OS: Amazon's home can't be replaced, so HomeRedirectService swaps it for this launcher. If Home stops
+         redirecting after a Fire OS update, set the hint to empty (redirects every Amazon home screen). -->
+    <string name="stock_home_package" translatable="false">com.amazon.tv.launcher</string>
+    <string name="stock_home_class_hint" translatable="false">HomeActivity</string>
+
+    <!-- Fire OS ignores third-party HOME screens. -->
+    <bool name="register_as_home">false</bool>
+
+    <!-- No HDMI inputs on a stick, so no Inputs button. -->
+    <bool name="show_inputs">false</bool>
+</resources>

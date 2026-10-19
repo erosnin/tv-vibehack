@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher configuration. Edit this file, then run launcher/build-and-install.sh.
+  Package names: on the TV run `pm list packages` (tools/tv.py 'pm list packages').
+-->
+<resources>
+    <!-- Fire TV config for launcher/app/src/main/res/values/config.xml. Copy this file over it, then run
+         REDIRECT_HOME=1 STOCK_LAUNCHER= TV_HOST=<ip> launcher/build-and-install.sh  (see README, "Fire TV"). -->
+
+    <!-- Apps pinned to the dock row at the bottom, in this order. Missing apps are skipped. -->
+    <string-array name="dock_apps">
+        <item>com.netflix.ninja</item>
+        <item>com.amazon.firetv.youtube</item>
+        <item>com.spotify.tv.android</item>
+        <item>com.amazon.cloud9</item>
+    </string-array>
+
+    <!-- Apps never shown as tiles (e.g. the Live TV app, which the Inputs menu already covers). -->
+    <string-array name="hidden_apps">
+        <item>com.apple.airplay.amazon.airplay</item>
+        <item>com.hipsterwhale.crossy</item>
+    </string-array>
+
+    <!-- The TV's Live TV / tuner app, offered at the end of the Inputs menu. Leave empty to omit. -->
+    <string name="live_tv_package" translatable="false">com.amazon.tv.livetv</string>
+
+    <!-- Tiles per row in the grid; the dock always has this many slots. -->
+    <integer name="columns">4</integer>
+
+    <!-- Fire OS only: package of the stock home screen to redirect to this launcher (see HomeRedirectService), and
+         part of its home activity's class name. Leave empty on TVs where this launcher is the real home. -->
+    <string name="stock_home_package" translatable="false">com.amazon.tv.launcher</string>
+    <string name="stock_home_class_hint" translatable="false">HomeActivity</string>
+
+    <!-- Register as a HOME screen. Set false on Fire TV, where the stock home can't be replaced; the launcher
+         is then opened from the app list (as "TV Home"). -->
+    <bool name="register_as_home">false</bool>
+
+    <!-- A TV has HDMI inputs, so keep the Inputs button. -->
+    <bool name="show_inputs">true</bool>
+</resources>

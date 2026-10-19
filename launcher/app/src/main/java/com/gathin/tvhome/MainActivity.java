@@ -7,7 +7,6 @@ import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.Rect;
 import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.GradientDrawable;
 import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
@@ -41,12 +40,12 @@ import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
 import java.util.ArrayList;
-import java.util.Calendar;
 import java.util.Collections;
 import java.util.List;
 
 /**
- * tvOS style home: black, a pinned dock row, an app grid, and one glass highlight that springs between tiles.
+ * Nocturne home: a light silver/teal background, a "continue in" hero for the last app you opened, a top bar,
+ * a pinned row of silver tiles and one teal focus ring that springs between tiles.
  */
 public class MainActivity extends Activity implements AppAdapter.TileListener {
 
@@ -59,24 +58,23 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private RecyclerView grid;
     private FrameLayout root;
     private GlassView glass;
-    private View ambient;
-    private TextView heroName;
-    private GradientDrawable ambientGlow;
-    private int ambientColor;
+    private View heroBlock;
+    private TextView heroLabel;
+    private TextView heroTitle;
+    private View btnResume;
+    private AppAdapter.Entry resumeEntry;
     private boolean heroShown;
-    private TextView greeting;
     private TextView btnWifi;
     private SpringAnimation springX, springY;
     private float glassTargetX, glassTargetY;
     private boolean glassShown;
-    private int lastFocused = 0;
+    private int lastDockFocused = 0;
     private float density;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable minuteTick = new Runnable() {
         @Override
         public void run() {
-            updateGreeting();
             updateWifiLabel();
             handler.postDelayed(this, MINUTE_MS);
         }
@@ -92,15 +90,10 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         root = findViewById(R.id.root);
         glass = findViewById(R.id.glass);
-        ambient = findViewById(R.id.ambient);
-        heroName = findViewById(R.id.heroName);
-        ambientGlow = new GradientDrawable();
-        ambientGlow.setGradientType(GradientDrawable.RADIAL_GRADIENT);
-        ambientGlow.setGradientCenter(0.32f, 0.42f);
-        ambient.setBackground(ambientGlow);
-        ambient.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) ->
-                ambientGlow.setGradientRadius((r - l) * 0.62f));
-        greeting = findViewById(R.id.greeting);
+        heroBlock = findViewById(R.id.heroBlock);
+        heroLabel = findViewById(R.id.heroLabel);
+        heroTitle = findViewById(R.id.heroTitle);
+        btnResume = findViewById(R.id.btnResume);
         btnWifi = findViewById(R.id.btnWifi);
 
         grid = findViewById(R.id.grid);
@@ -116,7 +109,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         // tvOS layout: push the dock row to the bottom of the screen; the grid hides below until you press Down.
         grid.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
             int h = b - t;
-            int dockRow = (int) ((145 + 6 + 12) * density);   // item height plus DockDecoration offsets
+            // item height (8 + stagger 20 + tile 92 + 8) plus DockDecoration offsets
+            int dockRow = (int) ((128 + 6 + 12) * density);
             int want = Math.max(0, h - dockRow - (int) (30 * density));
             if (grid.getPaddingTop() != want) {
                 grid.setPadding(grid.getPaddingLeft(), want, grid.getPaddingRight(), grid.getPaddingBottom());
@@ -143,21 +137,45 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
         View btnInputs = findViewById(R.id.btnInputs);
         View btnSettings = findViewById(R.id.btnSettings);
+        boolean showInputs = getResources().getBoolean(R.bool.show_inputs);
+        if (!showInputs) btnInputs.setVisibility(View.GONE);   // streaming sticks have no inputs to switch
+        final int leftmostPill = showInputs ? R.id.btnInputs : R.id.btnWifi;
         btnInputs.setOnClickListener(v -> showInputs());
         btnWifi.setOnClickListener(v -> open(new Intent(Settings.ACTION_WIFI_SETTINGS)));
         btnSettings.setOnClickListener(v -> open(new Intent(Settings.ACTION_SETTINGS)));
 
         // Keep focus on the top bar at its ends and at the top: Android's focus finder would otherwise
-        // jump to a tile far below when there is nothing in that direction.
+        // jump somewhere unexpected when there is nothing in that direction. Down goes to Resume (or the dock).
         View.OnKeyListener pillKeys = (v, keyCode, event) -> {
             if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) return true;
-            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v.getId() == R.id.btnInputs) return true;
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                focusHeroOrDock();
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v.getId() == leftmostPill) return true;
             return keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == R.id.btnSettings;
         };
         btnInputs.setOnKeyListener(pillKeys);
         btnWifi.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
+
+        // Resume: Down to the dock, Up to the top bar, nothing to the sides.
+        btnResume.setOnClickListener(v -> {
+            if (resumeEntry != null) adapter.launch(resumeEntry);
+        });
+        btnResume.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                focusTile(lastDockFocused);
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                btnWifi.requestFocus();
+                return true;
+            }
+            return keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT;
+        });
 
         // Hide the glass when focus leaves the tiles.
         getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldF, newF) -> {
@@ -171,21 +189,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         super.onResume();
         glassShown = false;
         glass.setAlpha(0f);
-        heroShown = false;
-        heroName.setAlpha(0f);
-        ambient.setAlpha(0f);
         adapter.reload();
         grid.scheduleLayoutAnimation();
-        updateGreeting();
+        updateHero();
         updateWifiLabel();
         handler.postDelayed(minuteTick, MINUTE_MS);
 
-        // Return to the tile we left from, or the first one.
-        grid.post(() -> {
-            View focused = getCurrentFocus();
-            if (focused != null && grid.findContainingViewHolder(focused) != null) return;
-            focusTile(lastFocused);
-        });
+        // Start on Resume when there is something to resume, otherwise on the dock tile we left from.
+        grid.post(this::focusHeroOrDock);
     }
 
     @Override
@@ -196,14 +207,14 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     @Override
     public void onBackPressed() {
-        // Home screen: Back goes nowhere.
+        // As the real home screen Back goes nowhere; when opened as a normal app (Fire OS) it returns to the stock home.
+        if (!getIntent().hasCategory(Intent.CATEGORY_HOME)) finish();
     }
 
     // ---- glass highlight -------------------------------------------------------------------------
 
     @Override
     public void onTileFocused(int position, View card) {
-        lastFocused = position;
         // Tile rect in root coordinates, using layout positions (ignores the scale animation).
         Rect r = new Rect(0, 0, card.getWidth(), card.getHeight());
         root.offsetDescendantRectToMyCoords(card, r);
@@ -218,7 +229,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             lp.width = (int) w;
             lp.height = (int) h;
             glass.setLayoutParams(lp);
-            glass.setRadius(16f * density * AppAdapter.FOCUS_SCALE + pad);
+            glass.setRadius(14f * density * AppAdapter.FOCUS_SCALE + pad);
         }
         glassTargetX = x;
         glassTargetY = y;
@@ -235,11 +246,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
         View item = (View) card.getParent();
         if (position < COLUMNS) {
-            // Dock: park it at the bottom of the screen and show the top shelf for this app.
+            // Dock: park it at the bottom of the screen and bring the hero back.
+            lastDockFocused = position;
             int decoratedTop = item.getTop() - (int) (6 * density);
             int dy = decoratedTop - grid.getPaddingTop();
             if (Math.abs(dy) > 1) grid.smoothScrollBy(0, dy);
-            showHero(position, r.top - dy);
+            showHero();
         } else {
             hideHero();
             // Scroll just enough so the whole glass (not only the tile) is visible.
@@ -248,51 +260,45 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         }
     }
 
-    // ---- top shelf -------------------------------------------------------------------------------
+    // ---- hero ------------------------------------------------------------------------------------
 
-    private void showHero(int position, float dockTopInRoot) {
-        String label = adapter.labelAt(position);
-        int color = adapter.ambientColorAt(position);
-        float y = dockTopInRoot - 14 * density - 26 * density - heroName.getHeight();
-        boolean changed = !label.contentEquals(heroName.getText());
-
-        if (!heroShown) {
-            heroName.setText(label);
-            heroName.setY(y);
-            heroName.setTranslationX(0f);
-            heroName.animate().alpha(1f).setDuration(260).start();
-            setAmbient(color);
-            ambient.animate().alpha(1f).setDuration(600).start();
-            heroShown = true;
-        } else if (changed) {
-            heroName.animate().alpha(0f).translationX(-12 * density).setDuration(120).withEndAction(() -> {
-                heroName.setText(label);
-                heroName.setY(y);
-                heroName.setTranslationX(12 * density);
-                heroName.animate().alpha(1f).translationX(0f).setDuration(200).start();
-            }).start();
-            if (color != ambientColor) {
-                ambient.animate().alpha(0.35f).setDuration(200).withEndAction(() -> {
-                    setAmbient(color);
-                    ambient.animate().alpha(1f).setDuration(500).start();
-                }).start();
-            }
-        } else {
-            heroName.setY(y);
+    /** Points the hero at the last app opened from here, or the first app when there is no history yet. */
+    private void updateHero() {
+        AppAdapter.Entry last = adapter.lastLaunched();
+        resumeEntry = last != null ? last : adapter.firstApp();
+        if (resumeEntry == null) {
+            heroBlock.setVisibility(View.INVISIBLE);
+            heroShown = false;
+            return;
         }
+        heroLabel.setText(last != null ? R.string.continue_in : R.string.open_first);
+        heroTitle.setText(resumeEntry.label);
+        heroBlock.setVisibility(View.VISIBLE);
+        heroBlock.setAlpha(1f);
+        heroShown = true;
     }
 
-    private void setAmbient(int color) {
-        ambientColor = color;
-        int c = color & 0x00FFFFFF;
-        ambientGlow.setColors(new int[]{0x5C000000 | c, 0x26000000 | c, 0x00000000 | c});
+    private void showHero() {
+        if (heroShown || resumeEntry == null) return;
+        heroShown = true;
+        heroBlock.setVisibility(View.VISIBLE);
+        heroBlock.animate().alpha(1f).setDuration(260).start();
     }
 
+    /** The full app grid scrolls up over the hero, so it fades out while you browse it. */
     private void hideHero() {
         if (!heroShown) return;
         heroShown = false;
-        heroName.animate().alpha(0f).setDuration(160).start();
-        ambient.animate().alpha(0f).setDuration(300).start();
+        heroBlock.animate().alpha(0f).setDuration(160).start();
+    }
+
+    private void focusHeroOrDock() {
+        if (resumeEntry != null && heroBlock.getVisibility() == View.VISIBLE) {
+            showHero();
+            btnResume.requestFocus();
+        } else {
+            focusTile(lastDockFocused);
+        }
     }
 
     private void hideGlass() {
@@ -308,7 +314,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         int count = adapter.getItemCount();
         int target;
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            if (position < COLUMNS) return false;          // dock row: let focus move to the top bar
+            if (position < COLUMNS) {                      // dock row: up to Resume, or the top bar
+                if (resumeEntry == null) return false;
+                showHero();
+                btnResume.requestFocus();
+                return true;
+            }
             target = position - COLUMNS;
         } else {
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
@@ -342,17 +353,6 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     }
 
     // ---- top bar ---------------------------------------------------------------------------------
-
-    private void updateGreeting() {
-        int hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
-        int res;
-        if (hour < 5) res = R.string.good_night;
-        else if (hour < 12) res = R.string.good_morning;
-        else if (hour < 17) res = R.string.good_afternoon;
-        else if (hour < 22) res = R.string.good_evening;
-        else res = R.string.good_night;
-        greeting.setText(res);
-    }
 
     /** Shows the Wi-Fi network name on the button when we can read it, otherwise the connection type. */
     private void updateWifiLabel() {
@@ -450,7 +450,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
 
     private void addSeparator(LinearLayout rows) {
         View line = new View(this);
-        line.setBackgroundColor(0x1FFFFFFF);
+        line.setBackgroundColor(0x1F182025);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int) density);
         int m = (int) (6 * density), h = (int) (12 * density);
         lp.setMargins(h, m, h, m);

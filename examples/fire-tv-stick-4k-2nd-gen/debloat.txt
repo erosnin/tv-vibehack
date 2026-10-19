@@ -1,0 +1,28 @@
+# Fire TV Stick 4K (2nd gen, codename kara), Fire OS 8.
+# NOT yet verified on a real 2nd-gen stick: this is the ads/telemetry part of examples/toshiba-fire-tv
+# (same Fire OS family). Packages your stick doesn't have are simply reported as unknown and skipped.
+# Streaming apps, casting, Alexa, updates and the stock launcher are left alone on purpose.
+#
+# Apply:   tools\disable.ps1 -TvHost <stick ip> -List examples\fire-tv-stick-4k-2nd-gen\debloat.txt
+# Undo:    tools\restore.ps1 -TvHost <stick ip> -List examples\fire-tv-stick-4k-2nd-gen\debloat.txt
+# Everything is DISABLED, not uninstalled. Put a # in front of any line you want to keep.
+
+# Ads, shopping, content recognition
+com.amazon.shoptv.client
+com.amazon.shoptv.firetv.client
+com.amazon.tv.acr
+com.amazon.tv.democontent.provider
+
+# Telemetry and metrics
+com.amazon.tv.fw.metrics
+com.amazon.neo.minerva
+com.amazon.neo.minerva.logcat
+com.amazon.wirelessmetrics.service
+com.amazon.perfcollection
+com.amazon.perfc
+com.amazon.dp.logger
+
+# Tutorials and promos
+com.amazon.storm.lightning.tutorial
+com.amazon.tmm.tutorial
+com.amazon.gamehub

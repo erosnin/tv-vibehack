@@ -93,8 +93,55 @@ tools/restore.sh examples/xiaomi-mi-tv-4a/debloat.txt        # undo it, restore 
 ## Supported TVs
 
 Anything running Android TV or Google TV: Xiaomi/Redmi, TCL, Hisense, Sony, OnePlus, Realme,
-Nvidia Shield and most others. Not Samsung Tizen, LG webOS or Amazon Fire TV (different OS, no ADB
-launcher replacement). Tested so far on the models in [`examples/`](examples/).
+Nvidia Shield and most others. Amazon Fire TV works with a workaround, see [Fire TV](#fire-tv).
+Not Samsung Tizen or LG webOS. Tested so far on the models in [`examples/`](examples/).
+
+## Fire TV
+
+**Fire TV Stick 4K with a Windows PC:** see [docs/NOCTURNE-FIRE-STICK.md](docs/NOCTURNE-FIRE-STICK.md) for the
+`nocturne-fire-stick` branch (light silver/teal restyle, PowerShell scripts, an APK built by GitHub Actions).
+
+Fire OS can be debloated the same way (`pm disable-user` works on most of Amazon's ad, shopping and
+telemetry packages), but it won't let you replace the home screen:
+
+- `cmd package set-home-activity` reports success and is ignored; Amazon's launcher has priority 950.
+- `com.amazon.tv.launcher` and `com.amazon.firehomestarter` are *protected packages*:
+  `pm disable-user` fails with `Cannot disable a protected package`, and so does force-stop.
+- Fire's app list doesn't show sideloaded launchers, so the new one can't just be opened from there.
+
+So the launcher can't *be* the home screen, but it can take over when Home is pressed.
+`HomeRedirectService` is a small accessibility service that watches for Amazon's home activity
+coming to the front and immediately starts this launcher instead:
+
+![Launcher on a Fire TV, with the Amazon Home tile first in the grid](docs/fire-tv-amazon-home-tile.jpg)
+
+- **Back to Amazon's home:** the first tile in the grid is **Amazon Home**. It lets the stock home
+  through once; it stays until you open another app, and the next Home press comes back to this
+  launcher. (If you are already on Amazon's home, Home keeps you there.)
+- **Speed:** about 1.1 s from Amazon's home appearing to this launcher being in front, measured over
+  nine Home presses from Netflix. Starting an activity from a background service straight after the
+  Home key is held for 5 s by Android (app switches are blocked unless the sender has
+  `STOP_APP_SWITCHES`), so the service starts the launcher through an alarm `PendingIntent`, which
+  the system itself sends. Amazon's home still flashes briefly before the redirect.
+- **Opt-in:** nothing changes on Android TV. The service does nothing unless `stock_home_package` is
+  set in `config.xml`, and it is only enabled when you pass `REDIRECT_HOME=1` to the install script.
+
+To set it up, copy `examples/toshiba-fire-tv/config.xml` over
+`launcher/app/src/main/res/values/config.xml` (edit the dock for the apps you use), then:
+
+```bash
+tools/disable.sh examples/toshiba-fire-tv/debloat.txt
+REDIRECT_HOME=1 STOCK_LAUNCHER= TV_HOST=192.168.1.50 launcher/build-and-install.sh
+```
+
+`STOCK_LAUNCHER=` (empty) keeps Amazon's launcher enabled. The script turns the service on from the adb
+shell (which may change secure settings itself), so the app needs no extra permission and no on-screen setup. Turn it off
+with `tools/tv.py 'settings delete secure enabled_accessibility_services'` (if nothing else used it)
+and Home goes back to normal. Undo the debloat with
+`tools/restore.sh examples/toshiba-fire-tv/debloat.txt com.amazon.tv.launcher`.
+
+Caveats: tested on one TV (Toshiba AFTHA004, Fire OS on Android 9). Fire OS may stop background
+services under memory pressure, and an OS update could change this behaviour. Reboots were not tested.
 
 ## Contributing
 

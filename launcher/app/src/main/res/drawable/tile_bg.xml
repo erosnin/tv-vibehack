@@ -1,5 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#FF1C1C1E" />
-    <corners android:radius="16dp" />
-</shape>
+<!-- Brushed silver with a glossy top half and a hairline edge. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:angle="315" android:startColor="#FFF2F4F6" android:centerColor="#FFD3D9DE"
+                android:endColor="#FFECEFF1" android:type="linear" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+    <item android:bottom="46dp">
+        <shape android:shape="rectangle">
+            <gradient android:angle="270" android:startColor="#F2FFFFFF" android:endColor="#59FFFFFF" />
+            <corners android:topLeftRadius="14dp" android:topRightRadius="14dp"
+                android:bottomLeftRadius="0dp" android:bottomRightRadius="0dp" />
+        </shape>
+    </item>
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#00000000" />
+            <stroke android:width="1dp" android:color="#FFC3CAD0" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+</layer-list>
